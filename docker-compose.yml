@@ -1,0 +1,124 @@
+version: "3.8"
+services:
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    restart: always
+    ports:
+      - 3020:3000
+    environment:
+      REACT_APP_API_URL: http://localhost:3000/api
+      PORT: 3000
+    networks:
+      - api-network
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - main-backend
+      - mailing-service
+    stdin_open: true
+    tty: true
+
+  main-backend:
+    build:
+      context: ./main-backend
+      dockerfile: Dockerfile
+      target: development
+    restart: always
+    ports:
+      - 3000:3000
+    networks:
+      - api-network
+    environment:
+      RABBITMQ_URI: amqp://rabbit:rabbit_pass@rabbitmq:5672
+      RABBIT_Q_NAME: send_email
+      RABBIT_Q2_NAME: email_status
+      DB_NAME: mail
+      DB_USERNAME: root
+      DB_HOST: db
+      DB_PASSWORD: password
+      DB_PORT: 3306
+      DB_SYNC: 'true'
+      PORT: 3000
+    volumes:
+      - ./main-backend:/app
+    depends_on:
+      - db
+      - mailing-service
+      - rabbitmq
+
+  mailing-service:
+    build:
+      context: ./mailing-service
+      dockerfile: Dockerfile
+      target: development
+    restart: always
+    ports:
+      - 3010:3000
+    environment:
+      RABBITMQ_URI: amqp://rabbit:rabbit_pass@rabbitmq:5672
+      RABBIT_Q_NAME: send_email
+      RABBIT_Q2_NAME: email_status
+      # SMTP_API_KEY: SG.XXXXXXXXXXXXXXXXXXXXXX
+      SMTP_SENDER: 
+      RETRY: 'true'
+      PORT: 3000
+    volumes:
+      - ./mailing-service:/app
+    networks:
+      - api-network
+      - rabbitmq-network
+    depends_on:
+      - rabbitmq
+
+  rabbitmq:
+    image: bitnami/rabbitmq:3.7
+    restart: always
+    environment:
+      RABBITMQ_USERNAME: rabbit
+      RABBITMQ_PASSWORD: rabbit_pass
+      RABBITMQ_DISK_FREE_LIMIT: 100000
+    expose:
+      - 5672
+      - 15672
+    ports:
+      - 5672:5672
+      - 15672:15672
+    volumes:
+      - rabbitmq-persist:/bitnami
+    networks:
+      - rabbitmq-network
+      - api-network
+
+  db:
+    image: mysql:8.0
+    cap_add:
+      - SYS_NICE
+    restart: always
+    networks:
+      - api-network
+    environment:
+      - MYSQL_DATABASE=mail
+      - MYSQL_ROOT_PASSWORD=password
+    expose:
+      - 3306
+    ports:
+      - 3306:3306
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+networks:
+  api-network:
+    driver: bridge
+  rabbitmq-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+    driver: local
+  rabbitmq-persist:
+    driver: local
